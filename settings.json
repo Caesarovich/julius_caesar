@@ -1,11 +1,11 @@
 {
   "Version": "1.0",
   "BotToken": "",
-  "Prefix": "!",
+  "Prefix": "c!",
   "CommandDelay": 1,
   "OwnerID": "",
   "InviteLink": "INVITE_LINK",
-  "SupportInviteLink": "Link for your support server",
+  "SupportInviteLink": "LINK",
 
   "Database": {
     "enabled": false,
@@ -17,10 +17,10 @@
 
 
   "DisabledModules": [
-    "GuildSettings"
+    
   ],
 
   "DisabledCommands": [
-    "Test"
+    
   ]
 }
