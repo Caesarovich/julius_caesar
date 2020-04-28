@@ -1,0 +1,26 @@
+{
+  "Version": "1.0",
+  "BotToken": "",
+  "Prefix": "!",
+  "CommandDelay": 1,
+  "OwnerID": "",
+  "InviteLink": "INVITE_LINK",
+  "SupportInviteLink": "Link for your support server",
+
+  "Database": {
+    "enabled": false,
+    "host" : "",
+    "database" : "",
+    "user" : "",
+    "password" : ""
+  },
+
+
+  "DisabledModules": [
+    "GuildSettings"
+  ],
+
+  "DisabledCommands": [
+    "Test"
+  ]
+}
