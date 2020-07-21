@@ -1,7 +1,7 @@
 // Music Module
 
 const CustomModuleBase = require('../classes/custom_module_base.js');
-const youtubedl = require('youtube-dl')
+const youtubedl = require('youtube-dl');
 
 var _module = new CustomModuleBase('Music');
 
@@ -31,7 +31,8 @@ _module.initGuild = (guild) => {
     _module.guilds[guild.id] = {
       queue: [],
       playing: false,
-      textChannel: null
+      textChannel: null,
+      leaveTimer: null
     }
   }
 }
@@ -41,16 +42,29 @@ _module.getGuild = (guild) => {
   return _module.guilds[guild.id];
 }
 
-_module.leave = async (member) => {
+
+_module.leaveMember = async (member) => {
   if (!member.guild.voice.channel) {
     return '❕ I am not in a voice channel !';
   } else if (member.guild.voice.channel !== member.voice.channel) {
     return '❌ You are not in the same voice channel as me !';
   } else {
-    const vcName = member.guild.voice.channel.name;
-    await member.guild.voice.channel.leave();
-    return `❕ Left channel **${vcName}**`;
+    _module.leave(member.guild);
+    return null;
   }  
+}
+
+_module.leave = async (guild) => {
+  if (guild.voice.connection && guild.voice.connection.dispatcher) {
+    guild.voice.connection.dispatcher.end();
+  }
+  const vcName = guild.voice.channel.name;
+
+  await guild.voice.channel.leave();
+
+  if (_module.getGuild(guild).textChannel) {
+    _module.getGuild(guild).textChannel.send( `❕ Left channel **${vcName}**`)
+  }
 }
 
 _module.join = async (member, textChannel, shouldAdvertSucces) => {
@@ -65,6 +79,7 @@ _module.join = async (member, textChannel, shouldAdvertSucces) => {
   } else {
     const voiceConnection = await member.voice.channel.join();
     textChannel.send(`🔉 Joined **${voiceConnection.channel.name}**`);
+    voiceConnection.voice.setSelfDeaf(true);  // Make the bot deaf
     return true;
   }  
 }
@@ -79,7 +94,11 @@ _module.addSong = async (member, textChannel, url, playAfter) => {
     _module.setTextChannel(textChannel);
 
     youtubedl.getInfo(url, [], function(err, info) {
-      if (err) throw err
+      if (err) {
+        console.log('[YoutubeDL Error] ', err);
+        textChannel.send('📡 Sadly, an error occured while trying to fetch this video from youtube !');
+        return;
+      }
 
     
       if (info._duration_raw < 7200) {
@@ -92,13 +111,17 @@ _module.addSong = async (member, textChannel, url, playAfter) => {
             raw: info._duration_raw,
             hms: info._duration_hms
           },
-          videoFileURL: info.url
+          videoFileURL: info.url,
+          url: url
         });
         textChannel.send(`🎵 Added **${info.title}** to queue !`);
         if (playAfter) {
-          console.log("Play next song 1")
           _module.playNextSong(member.guild);
-        }    
+        }
+        if (_module.getGuild(member.guild).leaveTimer) {
+          clearTimeout(_module.getGuild(member.guild).leaveTimer);
+          _module.getGuild(member.guild).leaveTimer = null;
+        }
       } else {
         textChannel.send(`⏳ This song is too long (2 Hours max) !`);
       }
@@ -109,8 +132,8 @@ _module.addSong = async (member, textChannel, url, playAfter) => {
 }
 
 _module.skip = async (guild, textChannel) => {
-  if (guild.voice.connection && guild.voice.connection.dispatcher){
-    if (_module.getGuild(guild).pmlaying){
+  if (guild.voice.connection){
+    if (_module.getGuild(guild).playing){
       _module.getGuild(guild).textChannel = textChannel;
       textChannel.send(`Skipped **${_module.getGuild(guild).currentSong.title}**`);
       guild.voice.connection.dispatcher.end();
@@ -120,17 +143,15 @@ _module.skip = async (guild, textChannel) => {
   }
 }
 
+
 _module.playNextSong = async (guild) => {
   if (guild.voice.connection != null){
-    console.log('AAA')
-    console.log(_module.getGuild(guild).queue)
     if (_module.getGuild(guild).queue.length >= 1) {
-      console.log('_module.getGuild(guild).queue')
       const currentSong = _module.getGuild(guild).queue.shift();
       _module.getGuild(guild).currentSong = currentSong;
 
       _module.getGuild(guild).playing = true;
-
+      
 
       var message = new Discord.MessageEmbed()
         .setAuthor('Youtube')
@@ -138,25 +159,40 @@ _module.playNextSong = async (guild) => {
         .setColor('#ff0000')
         .setThumbnail(currentSong.thumbnail)
         .setURL(currentSong.webpage)
+        .addField('Song duration:', currentSong.duration.hms, true)
+        .addField('Songs in queue:', _module.getGuild(guild).queue.length, true)
 
       _module.getGuild(guild).textChannel.send(message);
 
       guild.voice.connection.play(currentSong.videoFileURL).on("finish", () => {
-        console.log('eee')
         _module.getGuild(guild).playing = false;
         _module.getGuild(guild).currentSong = null;
-        //_module.playNextSong(guild);
-      }).on("error", error => console.error('[Music Error] ', error));
+        _module.playNextSong(guild);
+      }).on("error", error => {
+        console.error('[Music Error] ', error);
+        _module.getGuild(guild).playing = false;
+        _module.getGuild(guild).currentSong = null;
+      }).setVolume(Modules.GuildSettings.getSetting(guild.id, 'volume') / 100);
     } else {
       _module.getGuild(guild).queue.shift();  // No more song to play
       _module.getGuild(guild).textChannel.send('No more songs.');
+      _module.getGuild(guild).leaveTimer = setTimeout(() => {
+        _module.leave(guild);
+      }, 180 * 1000);
+      
     }
   }
 }
 
 
 _module.Init = () => {
-  _module.guilds = _module.__addBackedUpVar('guilds', {})
+  _module.guilds = _module.__addBackedUpVar('guilds', {});
+  _module.__addListener(Bot, 'channelDisconnect', (oldState) => {
+    if (oldState.member === oldState.guild.me) {
+      _module.getGuild(oldState.guild).playing = false;
+      _module.getGuild(oldState.guild).currentSong = null;
+    }
+  });
 }
 
 module.exports = _module;  // Export module
